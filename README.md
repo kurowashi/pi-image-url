@@ -1,30 +1,22 @@
 # pi-image-url
 
-画像URLを1回のツール呼び出しでモデルに見せる Pi 拡張です。
+画像 URL を 1 回のツール呼び出しでモデルに見せる Pi 拡張です。
 
-Pi の `read` はローカルパス専用で URL を開けません。画像URLを見せるには `curl` で保存してから `read` に渡す2手が必要でした。この拡張はその2手を `read_image_url` の1手にします。
+Pi の `read` はローカルパスしか開けません。URL の画像を見せるには、`curl` で保存してから `read` に渡す 2 手が必要でした。
+この拡張は、その 2 手を `read_image_url` の 1 手にまとめます。
 
 ```
 read_image_url(url: "https://example.com/chart.png")
-  → 画像がそのままモデルに届く（一時ファイルなし）
+  → 画像がそのまま会話に入る（一時ファイルは作らない）
 ```
 
-## 動作
+## 使い方
 
-| 項目 | 値 |
-|---|---|
-| ツール | `read_image_url`（引数は `url` のみ） |
-| 対象URL | `http` / `https` |
-| 対応形式 | `image/png` / `image/jpeg` / `image/gif` / `image/webp`（`image/jpg` は jpeg として扱う） |
-| サイズ上限 | 20 MiB（受信しながら判定し、超えた時点で中断する） |
-| リダイレクト | 追従する |
-| 中断 | Esc / ターン中断で停止する |
-| リサイズ | Pi 本体の自動リサイズに任せる |
+モデルは画像 URL を受け取ると `read_image_url` を呼びます。手動で頼む場合は、次のように書きます。
 
-- 画像は一時ファイルに保存せず、ツール結果に画像ブロックとして直接入ります。
-- 失敗時は、不正なURL、HTTPステータス、Content-Type の欠落または非対応、サイズ超過、対応外スキームを原因付きでエラーとして返します。
-
-Content-Type は大文字小文字を区別せず、`;` 以降のパラメータを無視して判定します。Content-Type がない応答は拒否します。
+```
+https://example.com/chart.png を read_image_url で表示して
+```
 
 ## インストール
 
@@ -32,50 +24,66 @@ Content-Type は大文字小文字を区別せず、`;` 以降のパラメータ
 pi install git:github.com/kurowashi/pi-image-url
 ```
 
-ref を固定する場合は `pi install git:github.com/kurowashi/pi-image-url@<tag|commit>`。
+バージョンを固定する場合は `pi install git:github.com/kurowashi/pi-image-url@<tag|commit>` を使います。
+ローカルの作業コピーを使う場合は `pi install /path/to/pi-image-url` を使います。
 
-ローカルの作業コピーを使う場合:
+開発とテストは Pi 1.0.3 と Node.js 22.19 以上で行っています。
 
-```bash
-pi install /path/to/pi-image-url
-```
+## ツールの仕様
 
-または直接読み込み:
+| 項目 | 内容 |
+|---|---|
+| ツール名 | `read_image_url` |
+| 引数 | `url`（文字列）のみ。`http` / `https` の絶対 URL |
+| 対応形式 | PNG / JPEG / GIF / WebP（`image/jpg` は JPEG として扱う） |
+| サイズ上限 | 20 MiB |
+| リダイレクト | 追従する |
+| 表示サイズ | Pi 本体が自動リサイズする（2000×2000 以内。Pi の自動リサイズ設定に従う） |
+| 中断 | Esc またはターンの中断で止まる |
 
-```bash
-pi --extension /path/to/pi-image-url/src/index.ts
-```
+- 画像は一時ファイルに保存せず、ツールの結果としてモデルに直接渡します。
+- Cookie や Authorization ヘッダーは送りません。認証が必要な URL は取得できません。
 
-## 使い方
+### Content-Type の判定
 
-モデルは画像URLを受け取ると `read_image_url` を呼びます。手動で呼ばせる例:
+- 大文字と小文字を区別せず、`;` 以降のパラメータ（`charset=...` など）は無視します。
+- `image/jpg` は `image/jpeg` として扱います。
+- Content-Type がない応答は拒否します。
+- Content-Type は本文を読む前に判定します。対応外の形式は、本文を取得せずに失敗します。
 
-```
-https://example.com/chart.png を read_image_url で表示して
-```
+### 失敗の例
+
+失敗すると、原因を示すエラーがツール結果として返ります。セッションは続きます。
+
+| 原因 | エラーの例 |
+|---|---|
+| URL が不正、または `http` / `https` 以外 | `Unsupported URL scheme "file". read_image_url accepts http and https; use read for local files.` |
+| HTTP エラー | `Failed to download image: HTTP 404.` |
+| Content-Type がない、または対応外 | `Unsupported image type "text/html". Supported: image/png, image/jpeg, image/gif, image/webp.` |
+| サイズ超過 | `Image is over the 20 MiB limit (received 25.3 MiB).` |
+
+サイズは次の順で確認します。
+
+1. 応答の `Content-Length` が 20 MiB を超えていれば、本文を取得せずに失敗します。
+2. `Content-Length` がない場合、または上限以内の場合も、受信しながら数えます。20 MiB を超えた時点で中断します。
+
+## 画像の入り方
+
+| 入力 | 使うツール |
+|---|---|
+| 画像の URL（`http` / `https`） | `read_image_url`（この拡張） |
+| ローカルファイルのパス | `read`（Pi 本体） |
+| `data:` URL | 対象外 |
+
+- 画像を表示できるのは、画像入力に対応したモデルだけです。対応していないモデルには画像は渡らず、「画像は省略された」という旨のテキストが渡ります。
+- SVG や BMP などの対応外の形式は、Content-Type の判定で失敗します。
 
 ## 制限
 
-- ローカルファイルは対象外です。`read` を使ってください。
-- `data:` URL、SVG / BMP など変換が必要な形式は対象外です。
-- 認証は行いません（Cookie / Authorization ヘッダは送りません）。
-- 表示できるのは画像対応モデルだけです。非対応モデルにはプレースホルダが渡ります。
-- 一括取得・キャッシュ・リトライはありません。1回の呼び出しで1枚を取得します。
-
-## 関連
-
-| 手段 | 画像URL | ローカルファイル | `data:` URL |
-|---|---|---|---|
-| `read_image_url`（この拡張） | ✅ | ❌ | ❌ |
-| `read`（Pi 本体） | ❌ | ✅ | ❌ |
-| codemode の `image()` | ❌（remote URL 非対応） | base64 化すれば可 | ✅ |
-
-## 開発
-
-```bash
-npm install
-npm run verify
-```
+- 一度に取得するのは 1 枚です。一括取得、キャッシュ、リトライはありません。
+- 認証付きの URL は取得できません。
+- タイムアウトはありません。応答しないサーバーでは、Esc で中断するまで待ちます。
+- サイズの上限を変更する設定はありません。
 
 ## ライセンス
 
